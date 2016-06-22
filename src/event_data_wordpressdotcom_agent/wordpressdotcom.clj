@@ -57,11 +57,11 @@
           ; If we're blocked after 20 tries (17 minute delay) then just give up the whole thing.
     (let [result (try-try-again {:tries 10 :decay :double :delay 10000} #(fetch-page domain page-number))
           filtered (filter (fn [item]
-                            (let [date (clj-time-coerce/from-long (* 1000 (Integer/parseInt (:epoch-time item))))]
+                            (let [date (clj-time-coerce/from-long (* 1000 (Long/parseLong (:epoch-time item))))]
                               (and (clj-time/after? date start-date)
                                    (clj-time/before? date end-date)))) result)
 
-          dates (map #(clj-time-coerce/from-long (* 1000 (Integer/parseInt (:epoch-time %)))) result)
+          dates (map #(clj-time-coerce/from-long (* 1000 (Long/parseLong (:epoch-time %)))) result)
           dates-before-start (filter #(clj-time/before? % start-date) dates)
           ; don't continue if we get an empty result.
           ; don't continue if some of the dates are before the earliest date we're interested in.
@@ -131,7 +131,7 @@
         ; Transform into a JSONable object for storing.
         domains-to-save (map #(hash-map "domain" %) all-domains)]
     (l/info "Queue up domains...")
-    (doseq [domain domains]
+    (doseq [domain all-domains]
       (baleen-queue/enqueue
         context
         "input"
