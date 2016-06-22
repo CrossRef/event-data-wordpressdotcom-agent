@@ -37,15 +37,21 @@
     (map (fn [child]
                   { :link (get child "link")
                     :title (get child "title")
-                    :epoch-time (get child "epoch_time")}) parsed)))
-                    
+                    :epoch-time (get child "epoch_time")
+                    :time-str (-> child
+                                  (get "epoch_time")
+                                  Long/parseLong
+                                  (* 1000)
+                                  clj-time-coerce/from-long
+                                  clj-time-coerce/to-string)}) parsed)))
 
 (defn fetch-page
   [domain page-number]
   (l/info "Fetch domain:" domain "page" page-number)
-  (let [result @(http-client/get "https://en.search.wordpress.com" {:query-params {"f" "json" "size" 20 "t" "post" "q" domain "page" page-number "s" "date"}
+  (let [result @(http-client/get "https://en.search.wordpress.com" {:query-params {"f" "json" "size" 20 "t" "post" "q" (str \" domain \") "page" page-number "s" "date"}
                                                                     :headers {"User-Agent" "Crossref Event Data eventdata.crossref.org (labs@crossref.org)"}})]
     (l/info "Response" (:headers result))
+
     (parse-page (:body result))))
 
 (defn fetch-data-for-domain
@@ -55,13 +61,15 @@
   (loop [results (list)
          page-number 1]
           ; If we're blocked after 20 tries (17 minute delay) then just give up the whole thing.
-    (let [result (try-try-again {:tries 10 :decay :double :delay 10000} #(fetch-page domain page-number))
+    (let [result (try-try-again {:tries 10 :decay :double :delay 10000}
+                                #(fetch-page domain page-number))
           filtered (filter (fn [item]
-                            (let [date (clj-time-coerce/from-long (* 1000 (Long/parseLong (:epoch-time item))))]
+                            (let [date (clj-time-coerce/from-string (:time-str item))]
                               (and (clj-time/after? date start-date)
                                    (clj-time/before? date end-date)))) result)
 
-          dates (map #(clj-time-coerce/from-long (* 1000 (Long/parseLong (:epoch-time %)))) result)
+          dates (map #(clj-time-coerce/from-string (:time-str %)) result)
+          
           dates-before-start (filter #(clj-time/before? % start-date) dates)
           ; don't continue if we get an empty result.
           ; don't continue if some of the dates are before the earliest date we're interested in.
@@ -107,7 +115,7 @@
     (l/info "Done domain" domain ". Having a sleep."))
 
   ; Don't overload API
-  (Thread/sleep 5000)
+  (Thread/sleep 3000)
   true)
 
 (defn process
