@@ -4,10 +4,10 @@ After=redis-server.service
 
 [Service]
 Type=simple
-PIDFile=/var/run/event-data-newsfeed-agent-push.pid
-WorkingDirectory=/home/deploy/event-data-newsfeed-agent
-Environment=CONFIG=/home/deploy/event-data-newsfeed-agent/config/prod/config.edn
-ExecStart=/usr/bin/java -jar /home/deploy/event-data-newsfeed-agent/target/uberjar/event-data-newsfeed-agent-0.1.0-SNAPSHOT-standalone.jar push
+PIDFile=/var/run/event-data-wordpressdotcom-agent-push.pid
+WorkingDirectory=/home/deploy/event-data-wordpressdotcom-agent
+Environment=CONFIG=/home/deploy/event-data-wordpressdotcom-agent/config/prod/config.edn
+ExecStart=/usr/bin/java -jar /home/deploy/event-data-wordpressdotcom-agent/target/uberjar/event-data-wordpressdotcom-agent-0.1.0-SNAPSHOT-standalone.jar push
 Restart=on-abort
 User=deploy
 
