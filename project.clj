@@ -12,7 +12,6 @@
                  [com.amazonaws/aws-java-sdk "1.11.6"]
                  [http-kit "2.1.18"]
                  [org.clojure/data.json "0.2.6"]
-
                  [crossref/baleen "0.1"]]
   :main ^:skip-aot event-data-wordpressdotcom-agent.core
   :target-path "target/%s"

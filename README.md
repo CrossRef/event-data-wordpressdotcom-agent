@@ -40,7 +40,16 @@ Runs monitoring web server. Runs continously.
 
     lein with-profile dev run monitor
 
-## License
+## Install on production
+
+`lein uberjar` to compile. Systemd scripts in `etc`:
+
+ - `event-data-wordpressdotcom-agent-ingest.service`
+ - `event-data-wordpressdotcom-agent-monitor.service`
+ - `event-data-wordpressdotcom-agent-process.service`
+ - `event-data-wordpressdotcom-agent-push.service`
+
+ ## License
 
 Copyright © 2016 Crossref
 
