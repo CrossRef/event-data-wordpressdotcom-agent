@@ -1,154 +1,106 @@
 (ns event-data-wordpressdotcom-agent.wordpressdotcom
-  "Interfacing with Wordpress.com."
-  
-  (:require [baleen.queue :as baleen-queue]
-            [baleen.time :as baleen-time]
-            [baleen.context :as baleen-context]
-            [baleen.util :as baleen-util]
-            [baleen.web :as baleen-web]
-            [baleen.stash :as baleen-stash]
-            [baleen.reverse :as baleen-reverse])
-
+  "Interfacing with Wordpress.com."  
   (:require [clojure.set :as set]
-            [clojure.tools.logging :as l]
+            [clojure.tools.logging :as log]
             [clojure.data.json :as json]
-            [clojure.java.io :as io])
-  (:require [config.core :refer [env]])
-  (:require [clj-time.core :as clj-time]
+            [clojure.java.io :as io]
+            [config.core :refer [env]]
+            [clj-time.core :as clj-time]
             [clj-time.format :as clj-time-format]
-            [clj-time.coerce :as clj-time-coerce])
-  (:require [org.httpkit.client :as http-client])
-  (:import [java.util UUID])
-  (:import [com.amazonaws.services.s3 AmazonS3 AmazonS3Client]
-           [com.amazonaws.auth BasicAWSCredentials]
-           [com.amazonaws.services.s3.model GetObjectRequest PutObjectRequest])
-  (:require [robert.bruce :refer [try-try-again]])
+            [clj-time.coerce :as clj-time-coerce]
+            [clj-http.client :as http-client]
+            [robert.bruce :refer [try-try-again]])
+  (:import [java.util UUID]
+           [org.apache.commons.codec.digest DigestUtils]
+           [org.apache.commons.lang3 StringEscapeUtils])
   (:gen-class))
 
-; ; wordpressdotcom includes subdomains
-(def hardcoded-domains ["doi.org"])
+
+(def date-format
+  (:date-time-no-ms clj-time-format/formatters))
+
+(def user-agent "CrossrefEventDataBot (eventdata@crossref.org)")
+
+(def query-url-base "https://en.search.wordpress.com")
+
+; The Wordpress API is very flaky and can paginate erratically. Never go past this many pages.
+(def max-pages 20)
+
+(defn stop-at-dupe
+  "Take from items until we meet a duplicate pair. Wordpress.com API sometimes sends dulicate pages. Bail out if that happens."
+  [items]
+  (map first (take-while (partial apply not=) (partition-all 2 1 items))))
+
+(defn fetch-pages
+  "Retrieve Wordpress results as a lazy seq of parsed pages of {:url :results}."
+  ([domain] (fetch-pages domain 1))
+  ([domain page-number]
+    ; If we're blocked after 20 tries (17 minute delay) then just give up the whole thing.
+    (let [query-params {"f" "json"
+                        "size" 20
+                        "t" "post"
+                        "q" (str \" domain \")
+                        "page" page-number
+                        "s" "date"}
+
+          ; The API can return nil value to represent the end of results, or sometimes at random.
+          ; Therefore throw an exception to trigger a re-try when we get a null, just in case.
+          result-parsed (try
+                          (try-try-again {:tries 2 :decay :double :delay 1000}
+                                         (fn [] (let [result (http-client/get query-url-base {:query-params query-params :headers {"User-Agent" user-agent}})
+                                                      body (when-let [body (:body result)] (json/read-str body))]
+                                                  (if body
+                                                      body
+                                                      (throw (new Exception))))))
+                          (catch Exception ex nil))
+
+          url (str query-url-base "?" (http-client/generate-query-string query-params))]
+      (log/info "Retrieved" url)
+
+      ; The API just returns nil when there's no more data (or we got another failure).
+      (if (nil? result-parsed)
+        nil
+        (lazy-cat [{:url url :results result-parsed}]
+                  (fetch-pages domain (inc page-number)))))))
+
+(defn parse-item
+  "Parse a page item into an Action."
+  [item]
+  (let [url (get item "link")
+        title (get item "title")
+        date (-> item
+               (get "epoch_time")
+               Long/parseLong
+               (* 1000)
+               clj-time-coerce/from-long)
+
+        date-str (clj-time-format/unparse date-format date)
+
+        ; Use the URL of the blog post as the action identifier.
+        ; This means that the same blog post in different feeds (or even sources) will have the same ID.
+        action-id (DigestUtils/sha1Hex ^String url)]
+    {:id action-id
+     :url url
+     :relation-type-id "discusses"
+     :occurred-at date-str
+     :observations [{:type :content-url :input-url url :sensitive true}]
+     :subj {
+      :type "post-weblog"
+      ; We find occasional HTML character entities.
+      :title (StringEscapeUtils/unescapeHtml4 title)}}))
 
 (defn parse-page
-  "Parse response JSON. Return
-  {:after-token ; can be nil
-   [{:link, :title, :epoch-time, :date}]}"
-  [json-data]
-  (let [parsed (json/read-str json-data)]
-    (map (fn [child]
-                  { :link (get child "link")
-                    :title (get child "title")
-                    :epoch-time (get child "epoch_time")
-                    :time-str (-> child
-                                  (get "epoch_time")
-                                  Long/parseLong
-                                  (* 1000)
-                                  clj-time-coerce/from-long
-                                  clj-time-coerce/to-string)}) parsed)))
+  [page]
+  {:url (:url page) :actions (map parse-item (:results page))})
 
-(defn fetch-page
-  [domain page-number]
-  (l/info "Fetch domain:" domain "page" page-number)
-  (let [result @(http-client/get "https://en.search.wordpress.com" {:query-params {"f" "json" "size" 20 "t" "post" "q" (str \" domain \") "page" page-number "s" "date"}
-                                                                    :headers {"User-Agent" "Crossref Event Data eventdata.crossref.org (labs@crossref.org)"}})]
-    (l/info "Response" (:headers result))
+(defn take-pages-after
+  [date pages]
+  "Accept a seq of pages of Actions. Take pages until we get a page on which every entry occurs on or before the date."
+  (take-while (fn [page]
+                (some #(->> % :occurred-at (clj-time-format/parse date-format) (clj-time/before? date)) (:actions page)))
+              pages))
 
-    (parse-page (:body result))))
-
-(defn fetch-data-for-domain
-  "Return a seq of all the parsed results that match the start and end date."
-  [domain start-date end-date]
-  ; Iterate all pages.
-  (loop [results (list)
-         page-number 1]
-          ; If we're blocked after 20 tries (17 minute delay) then just give up the whole thing.
-    (let [result (try-try-again {:tries 10 :decay :double :delay 10000}
-                                #(fetch-page domain page-number))
-          filtered (filter (fn [item]
-                            (let [date (clj-time-coerce/from-string (:time-str item))]
-                              (and (clj-time/after? date start-date)
-                                   (clj-time/before? date end-date)))) result)
-
-          dates (map #(clj-time-coerce/from-string (:time-str %)) result)
-          
-          dates-before-start (filter #(clj-time/before? % start-date) dates)
-          ; don't continue if we get an empty result.
-          ; don't continue if some of the dates are before the earliest date we're interested in.
-          continue (and (not-empty result)
-                        (empty? dates-before-start))
-
-          results (concat results filtered)]
-
-      (if continue
-        (recur results (inc page-number))
-        results))))
-
-(defn yesterday-bounds
-  "Return a vector of [start-of-yesterday, end-of-yesterday]"
-  []
-  (let [today (clj-time/now)
-        yesterday (clj-time/minus today (clj-time/days 1))]
-    
-        [(clj-time/date-midnight (clj-time/year yesterday) (clj-time/month yesterday) (clj-time/day yesterday))
-         (clj-time/date-midnight (clj-time/year today) (clj-time/month today) (clj-time/day today))]))
-
-(defn process-f
-  [context json-blob]
-  (let [parsed (json/read-str json-blob)
-        {domain "domain" start-date-str "start-date" end-date-str "end-date"} parsed
-        start-date (clj-time-coerce/from-string start-date-str)
-        end-date (clj-time-coerce/from-string end-date-str)
-        new-items (fetch-data-for-domain domain start-date end-date)]
-
-    ; Now visit every page!
-    (doseq [item new-items]
-      (l/info "Look for DOIs in" (:link item))
-      (let [response (try-try-again {:tries 4 :decay :double :delay 10000} #(deref (http-client/get (:link item) {:headers {"User-Agent" "Crossref Event Data eventdata.crossref.org (labs@crossref.org)"}})))
-            body (:body response)
-            dois (when body (baleen-web/extract-dois-from-body-via-landing-page-urls context body))
-            events (map (fn [doi]
-              {:doi doi
-               :event-id (baleen-util/new-uuid)}) dois)]
-            (if-not (empty? events)
-              (baleen-queue/enqueue context "matched" (json/write-str {:input item :events events}) true)
-              (baleen-queue/enqueue context "unmatched" (json/write-str {:input item :events []}) true))))
-
-    (l/info "Done domain" domain ". Having a sleep."))
-
-  ; Don't overload API
-  (Thread/sleep 3000)
-  true)
-
-(defn process
-  "Process domains from queue. Runs forever."
-  [context]
-  (l/info "Start processing domains.")
-  (baleen-queue/process-queue context "input" (partial process-f context)))
-
-(defn queue-domains
-  "Queue all domains for yesterday."
-  [context]
-  (let [; Start and end of yesterday.
-        [start-date end-date] (yesterday-bounds)
-
-        _ (l/info "Check Wordpress.com for " start-date end-date)
-
-        ; Fetch a fresh set of domains.
-        domains (baleen-reverse/fetch-domains context)
-        all-domains (concat domains hardcoded-domains)
-
-        ; Transform into a JSONable object for storing.
-        domains-to-save (map #(hash-map "domain" %) all-domains)]
-    (l/info "Queue up domains...")
-    (doseq [domain all-domains]
-      (baleen-queue/enqueue
-        context
-        "input"
-        (json/write-str {:domain domain :start-date (clj-time-coerce/to-string start-date) :end-date (clj-time-coerce/to-string end-date)})
-        true))
-    (l/info "Finished queuing up domains.")
-
-    (l/info "Stash rules")
-    (baleen-stash/stash-jsonapi-list context domains-to-save "filter-rules/current.json" "domain" true)
-    (baleen-stash/stash-jsonapi-list context domains-to-save (str "filter-rules/" (baleen-time/format-ymd start-date) ".json") "domain" false)
-    (l/info "Finished stashing rules.")))
-
+(defn fetch-parsed-pages-after
+  "Return a seq of Percolator pages from the API that concern the given domain. As many pages as have events that occurred after the date."
+  [date domain]
+  (take-pages-after date (map parse-page (->> domain fetch-pages stop-at-dupe (take max-pages)))))

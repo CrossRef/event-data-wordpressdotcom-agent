@@ -1,55 +1,31 @@
 # Crossref Event Data Wordpress.com Agent
 
-Experimental agent for gathering data from sites hosted on wordpress.com, the commercial hosting provider.
+Agent for gathering data from sites hosted on wordpress.com, the commercial hosting provider.
 
 Work-in-progress as of June 2016.
 
-Connects to the Wordpress API once a day and queries for every member domain for yesterday's date. Then uses the DOI Reversal Service to attempt to discover the DOI for each. 
+## To run
 
-## Running
+To run as an agent, `lein run`. 
 
-Create a config file in `config/dev/config.edn` or `config/prod/config.edn` or via environment variables. Keys required specified in `core.clj` plus standard Baleen ones.
+## Tests
 
-### Daily
+### Unit tests
 
-Daily stashes audit logs on a daily basis. Runs and exits.
+ - `time docker-compose -f docker-compose-unit-tests.yml run -w /usr/src/app test lein test :unit`
 
-    lein with-profile dev run daily
+## Demo
 
-### Queue Domains
+    time docker-compose -f docker-compose-unit-tests.yml run -w /usr/src/app test lein repl
 
-Add adily domain job to queue. Must be run once a day. Runs and exits.
+## Config
 
-    lein with-profile dev run queue-domains
+ - `PERCOLATOR_SERVICE` e.g. https://percolator.eventdata.crossref.org
+ - `JWT_TOKEN`
+ - `STATUS_SERVICE_BASE`
+ - `ARTIFACT_BASE`, e.g. https://artifact.eventdata.crossref.org
 
-### Process
-
-Processes all request commands with a 5 second pause for rate limiting. Runs continously. 
-
-    lein with-profile dev run process
-
-### Push
-
-Pushes events into Lagotto. Runs continously.
-
-    lein with-profile dev run push
-
-### Monitor
-
-Runs monitoring web server. Runs continously.
-
-    lein with-profile dev run monitor
-
-## Install on production
-
-`lein uberjar` to compile. Systemd scripts in `etc`:
-
- - `event-data-wordpressdotcom-agent-ingest.service`
- - `event-data-wordpressdotcom-agent-monitor.service`
- - `event-data-wordpressdotcom-agent-process.service`
- - `event-data-wordpressdotcom-agent-push.service`
-
- ## License
+## License
 
 Copyright © 2016 Crossref
 
