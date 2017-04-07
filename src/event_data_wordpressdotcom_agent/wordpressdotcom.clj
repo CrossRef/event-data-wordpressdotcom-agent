@@ -35,6 +35,7 @@
   "Retrieve Wordpress results as a lazy seq of parsed pages of {:url :results}."
   ([domain] (fetch-pages domain 1))
   ([domain page-number]
+    ; If we're blocked after 20 tries (17 minute delay) then just give up the whole thing.
     (let [query-params {"f" "json"
                         "size" 20
                         "t" "post"
@@ -42,14 +43,18 @@
                         "page" page-number
                         "s" "date"}
 
-          ; The API can return nil value to represent the end of results, or sometimes at random.
-          ; However most search results are empty, so it would be wasteful to retry every one.
-          ; This is just a quirk of the source.
+          ; The API returns nil value to represent the end of results, but also sometimes at random during pagination.
+          ; Because most queries result in nil, don't re-try every nil. Instead only do this when we're at least into page 2 of a result set.
+          ; This is a compromise between retrying every single failed result and potentially missing out on some.
+          ; This is just a quirk of the Wordpress.com API.
           result-parsed (try
-                          (try-try-again {:tries 2 :decay :double :delay 1000}
+                          (try-try-again {:tries 3 :decay :double :delay 1000}
                                          (fn [] (let [result (http-client/get query-url-base {:query-params query-params :headers {"User-Agent" user-agent}})
                                                       body (when-let [body (:body result)] (json/read-str body))]
-                                                  body)))
+                                                  (if body
+                                                      body
+                                                      (when (> page 1)
+                                                        (throw (new Exception)))))))
                           (catch Exception ex nil))
 
           url (str query-url-base "?" (http-client/generate-query-string query-params))]
