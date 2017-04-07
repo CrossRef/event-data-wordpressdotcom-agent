@@ -26,7 +26,7 @@
         ; Take 12 hours worth of pages to make sure we cover everything. The Percolator will dedupe.
         num-domains (count domains)
         counter (atom 0)
-        cutoff-date (-> 12 clj-time/hours clj-time/ago)]
+        cutoff-date (-> 48 clj-time/hours clj-time/ago)]
     (doseq [domain domains]
       (swap! counter inc)
       (log/info "Query for domain:" domain @counter "/" num-domains " = " (int (* 100 (/ @counter num-domains))) "%")
@@ -45,7 +45,7 @@
   {:agent-name "wordpressdotcom-agent"
    :version version
    :schedule [{:name "check-all-domains"
-              :seconds 14400 ; wait four hours between scans
+              :seconds 86400 ; wait 24 hours between scans
               :fixed-delay true
               :fun check-all-domains
               :required-artifacts ["domain-list"]}]
