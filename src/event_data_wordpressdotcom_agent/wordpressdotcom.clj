@@ -53,7 +53,7 @@
                                                       body (when-let [body (:body result)] (json/read-str body))]
                                                   (if body
                                                       body
-                                                      (when (> page 1)
+                                                      (when (> page-number 1)
                                                         (throw (new Exception)))))))
                           (catch Exception ex nil))
 

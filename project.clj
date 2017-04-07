@@ -1,4 +1,4 @@
-(defproject event-data-wordpressdotcom-agent "0.1.1"
+(defproject event-data-wordpressdotcom-agent "0.1.2"
   :description "Event Data Wordpress.com Agent"
   :license {:name "MIT License"
             :url "https://opensource.org/licenses/MIT"}
