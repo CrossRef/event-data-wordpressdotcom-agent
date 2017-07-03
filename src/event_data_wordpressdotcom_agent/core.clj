@@ -5,7 +5,6 @@
             [event-data-common.status :as status]
             [event-data-wordpressdotcom-agent.wordpressdotcom :as wordpressdotcom]
             [org.crossref.event-data-agent-framework.core :as c]
-            [clojure.core.async :refer [>!!]]
             [config.core :refer [env]])
   (:gen-class))
 
@@ -18,12 +17,12 @@
 
 (defn check-all-domains
   "Check all domains for unseen links."
-  [artifacts bundle-chan]
+  [artifacts callback]
   (log/info "Start crawl all Domains on Wordpress.com at" (str (clj-time/now)))
-  (status/add! "wordpressdotcom-agent" "process" "scan-domains" 1)
+  (status/send! "wordpressdotcom-agent" "process" "scan-domains" 1)
   (let [[domain-list-url domain-list] (get artifacts "domain-list")
         domains (clojure.string/split domain-list #"\n")
-        ; Take 12 hours worth of pages to make sure we cover everything. The Percolator will dedupe.
+        ; Take 48 hours worth of pages to make sure we cover everything. The Percolator will dedupe.
         num-domains (count domains)
         counter (atom 0)
         cutoff-date (-> 48 clj-time/hours clj-time/ago)]
@@ -38,12 +37,14 @@
                      :extra {:cutoff-date (clj-time-format/unparse date-format cutoff-date) :queried-domain domain}
                      :pages pages}]
         (log/info "Sending package...")
-        (>!! bundle-chan package))))
+        (callback package)
+        (log/info "Sent package."))))
   (log/info "Finished scan."))
 
 (def agent-definition
   {:agent-name "wordpressdotcom-agent"
    :version version
+   :jwt (:wordpressdotcom-jwt env)
    :schedule [{:name "check-all-domains"
               :seconds 86400 ; wait 24 hours between scans
               :fixed-delay true

@@ -20,10 +20,13 @@ To run as an agent, `lein run`.
 
 ## Config
 
- - `PERCOLATOR_SERVICE` e.g. https://percolator.eventdata.crossref.org
- - `JWT_TOKEN`
- - `STATUS_SERVICE_BASE`
- - `ARTIFACT_BASE`, e.g. https://artifact.eventdata.crossref.org
+Uses Event Data global configuration namespace.
+
+ - `WORDPRESSDOTCOM_JWT`
+ - `GLOBAL_ARTIFACT_URL_BASE`
+ - `GLOBAL_KAFKA_BOOTSTRAP_SERVERS`
+ - `GLOBAL_STATUS_TOPIC`
+
 
 ## License
 

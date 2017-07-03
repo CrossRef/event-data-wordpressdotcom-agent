@@ -1,10 +1,10 @@
-(defproject event-data-wordpressdotcom-agent "0.1.2"
+(defproject event-data-wordpressdotcom-agent "0.2.2"
   :description "Event Data Wordpress.com Agent"
   :license {:name "MIT License"
             :url "https://opensource.org/licenses/MIT"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [org.crossref.event-data-agent-framework "0.1.17"]
-                 [event-data-common "0.1.20"]
+                 [org.crossref.event-data-agent-framework "0.2.0"]
+                 [event-data-common "0.1.30"]
                  [commons-codec/commons-codec "1.10"]
                  [robert/bruce "0.8.0"]
                  [clj-http "2.3.0"]
